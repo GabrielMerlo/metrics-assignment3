@@ -1,0 +1,66 @@
+---
+title: |
+  | Assignment 3 
+  | Econometrics I
+subtitle: "Universidad Carlos III de Madrid"
+author: "Gabriel Merlo"
+date:
+output: pdf_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+```
+
+# 1. Predicting wages in USA
+
+```{r include_packages, results = "hide"}
+# install (if missing) packages
+list_packages <- c("dplyr", "formatR", "ggplot2", "glmnet", "hdm", "Hmisc")
+new_packages <- list_packages[!(list_packages %in% installed.packages()[,"Package"])]
+if(length(new_packages)) install.packages(new_packages)
+
+# Load packages
+sapply(list_packages, require, character.only = TRUE)
+```
+## (a) Load, prepare and summarize the data
+
+```{r part_a, results = "hide"}
+## Load prepare and summarize the data
+
+# Load Census data from the US for the year 2012
+data("cps2012")
+
+# Check data and summarize
+str(cps2012)
+summary(cps2012) #no missing obs.
+head(cps2012)
+describe(cps2012)
+```
+## (b) Apply Ridge-Regression with cross-validation (CV)
+
+The ridge regression coefficient estimates $\hat{\beta}_R$ are the values that minimize $$\sum_{i=1}^{n}\left(y_i-\beta_0-\sum_{j=1}^{p}\beta_j x_{ij}\right)^2+\lambda\sum_{j=1}^{p}\beta_j^2$$
+
+Where $\lambda\geq 0$ is a penalty parameter that shrinks the estimates of $\beta_j$ towards zero as $\lambda\to\infty$ (with the extreme case were all coefficient estimates are zero and the model contains no predictors). When $\lambda=0$ the ridge coefficient estimates are the same as least squares (OLS) estimates.
+
+### (i) Apply ridge regression to the previous dataset for the the default grid of values of lambda. Plot the 10-fold CV MSE as a function of lambda.
+
+```{r part_b_i, tidy=TRUE, tidy.opts=list(width.cutoff=80)}
+
+# Define dependent variable y: lnw
+y <- cps2012$lnw
+
+# Define matrix of predictors
+x <- cps2012 %>% select(female, widowed, divorced, separated, nevermarried, hsd08, hsd911, hsg, cg, ad, mw, so, we, exp1, exp2, exp3) %>% data.matrix()
+
+## Apply ridge regression using glmnet
+
+# Define range of lambda values
+lambdas <- 10^seq(10, -2, by = -.1)
+
+# Estimate ridge model (we need to set alpha = 0 to get ridge coefficients)
+fit_ridge <- glmnet(x, y, alpha = 0, lambda = lambdas)
+summary(fit_ridge)
+```
+
+
