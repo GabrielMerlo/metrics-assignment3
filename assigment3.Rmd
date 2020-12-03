@@ -5,6 +5,9 @@ title: |
 subtitle: "Universidad Carlos III de Madrid"
 author: "Gabriel Merlo"
 date:
+header-includes: 
+  - \usepackage{float}
+      \floatplacement{figure}{H}
 output: pdf_document
 ---
 
@@ -16,7 +19,7 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align =
 
 ```{r include_packages, results = "hide"}
 # install (if missing) packages
-list_packages <- c("dplyr", "formatR", "ggplot2", "glmnet", "hdm", "Hmisc")
+list_packages <- c("dplyr", "formatR", "glmnet", "hdm", "Hmisc", "oaxaca")
 new_packages <- list_packages[!(list_packages %in% installed.packages()[,"Package"])]
 if(length(new_packages)) install.packages(new_packages)
 
@@ -41,22 +44,27 @@ describe(cps2012)
 
 ## (b) Apply Ridge-Regression with cross-validation (CV)
 
-The ridge regression coefficient estimates $\hat{\beta}_R$ are the values that minimize $$\sum_{i=1}^{n}\left(y_i-\beta_0-\sum_{j=1}^{p}\beta_j x_{ij}\right)^2+\lambda\sum_{j=1}^{p}\beta_j^2$$
+The ridge regression coefficient estimates $\hat{\beta}^R$ are the values that minimize
+
+<br>
+
+$$\sum_{i=1}^{n}\left(y_i-\beta_0-\sum_{j=1}^{p}\beta_j x_{ij}\right)^2+\lambda\sum_{j=1}^{p}\beta_j^2$$
+<br>
 
 Where $\lambda\geq 0$ is a tuning parameter that shrinks the estimates of $\beta_j$ towards zero as $\lambda\to\infty$ (with the extreme case were all coefficient estimates are zero and the model contains no predictors). When $\lambda=0$ the ridge coefficient estimates are the same as least squares (OLS) estimates.
 
-Implementing ridge regression requires a method for selecting a value for $\lambda$. This selection can be done using cross-validation (CV). A grid of values for $\lambda$ is chosen and the cross-validation error for each value is computed. The optimal value of $\lambda$ is that for which the cross-validation error is smallest. 
+Implementing ridge regression requires a method for selecting a value for $\lambda$. This selection can be done using cross-validation (CV). A grid of values for $\lambda$ is chosen and the CV error for each value is computed. The optimal value of $\lambda$ is that for which the CV error is smallest. 
 
 It's important to note that by default, the `glmnet()` function standardizes the variables so that they are on the same scale. This is done because ridge regression coefficients are depending on the scaling of the predictors. 
 
 ### (i) Apply ridge regression to the previous dataset for the the default grid of values of lambda. Plot the 10-fold CV MSE as a function of lambda.
 
-```{r part_b_i, tidy=TRUE, tidy.opts=list(width.cutoff=80), fig.cap = "MSE for the ridge regression predictions, as a function of $\\lambda$."}
+```{r part_b_i, tidy = TRUE, tidy.opts = list(width.cutoff = 80), fig.cap = "MSE for the ridge regression predictions, as a function of $\\lambda$.", out.width = '80%'}
 # Set seed
 set.seed(143)
 
 # Define training set (75% of total data)
-train <- cps2012 %>% sample_frac(0.75)
+train <- cps2012 %>% sample_frac(0.7)
 
 # Define test set
 test <- cps2012 %>% setdiff(train)
@@ -72,22 +80,253 @@ x_test <- test %>% select(female, widowed, divorced, separated, nevermarried, hs
 
 ## Apply ridge regression using glmnet
 
-# Define range of lambda values
-lambdas <- 10^seq(3, -2, by = -.1)
-
 # Estimate ridge model using train data and 10-fold CV (we need to set alpha = 0 to get ridge coefficients)
-fit_ridge <- cv.glmnet(x_train, y_train, alpha = 0, lambda = lambdas)
-summary(fit_ridge)
+cv_ridge <- cv.glmnet(x_train, y_train, alpha = 0)
+summary(cv_ridge)
 
-# Optimal value of lambda
-opt_lamb <- fit_ridge$lambda.min
-opt_lamb
+# Optimal lambda
+opt_lamb_ridge <- cv_ridge$lambda.min
 
 # Draw plot of training MSE as a function of lambda
-plot(fit_ridge)
+plot(cv_ridge)
+```
+### (ii) Then, select the optimal lambda ($\lambda$) by cross-validation. How many variables are used in the Ridge fit?
+
+```{r part b_ii}
+# Model estimation using optimal value of lambda
+ridge_reg <- glmnet(x_train, y_train, alpha = 0, lambda = opt_lamb_ridge)
 ```
 
+<br>
 
+The number of variables used is 16, the same as in OLS (since ridge does not make variable selection).
 
+### (iii) Why is the test MSE for Ridge often smaller than for OLS when lambda is not zero?
 
+The Mean Square Error (MSE) is a useful measure to evaluate model prediction performance. MSE will be small if the predicted values are very close to the true values observed in the data. In general, this prediction accuracy measure is calculated over unseen new data (also called test data). 
 
+In the following chunk the MSE is calculated using test data using both ridge and OLS methods.
+
+<br>
+
+```{r part b_iiI}
+## Test MSE
+
+# Ridge
+ridge_pred = predict(ridge_reg, s = opt_lamb_ridge, newx = x_test)
+ridge_mse <- mean((y_test - ridge_pred)^2)
+ridge_mse
+
+# OLS
+ols_reg <- glmnet(x_train, y_train, alpha = 0, lambda = 0)
+ols_pred = predict(ols_reg, newx = x_test)
+ols_mse <- mean((y_test - ols_pred)^2)
+ols_mse
+```
+
+In general, ridge MSE will be smaller than OLS MSE given that ridge allows for a decrease in variance (at the cost of an increase in the bias). OLS estimates correspond to the ridge regression with $\lambda=0$, and variance will decrease as $\lambda$ increases. 
+
+In this case $MSE_{OLS}<MSE_{ridge}$, which suggests OLS has a better adjustment than ridge, at least according to this performance measure. This is an example of why ridge is not always the best method.
+
+### What is the optimal value of lambda? Is unrestricted OLS optimal here, in a test MSE sense?
+
+```{r part b_iv}
+# Optimal value of lambda
+opt_lamb_ridge
+```
+<br>
+
+The optimal lambda is $\lambda^*=$ `r round(opt_lamb_ridge, 4)`. According to the MSE values found previously, OLS provides a better fit in terms of test data. 
+
+<br>
+
+## (c) Apply LASSO with cross-validation (CV):
+
+### (i) Apply Lasso regression to the previous dataset for the the default grid of values of lambda. Plot the 10-fold CV MSE as a function of lambda.
+
+Lasso is an alternative to ridge regression that allows for variable selection. The lasso coefficients $\hat{\beta}^L_\lambda$ minimize the quantity 
+
+<br>
+
+$$\sum_{i=1}^{n}\left(y_i-\beta_0-\sum_{j=1}^{p}\beta_j x_{ij}\right)^2+\lambda\sum_{j=1}^{p}|\beta_j|$$
+<br>
+
+As with the ridge regression, lasso shrinks the coefficients towards zero with the difference that the penalty term can force some of the coefficient estimates to be exactly equal to zero when $\lambda$ is sufficiently large. 
+
+<br>
+
+```{r part c_i, tidy = TRUE, tidy.opts = list(width.cutoff = 80),fig.cap = "MSE for the lasso regression predictions, as a function of $\\lambda$.", out.width = '80%'}
+# Estimate lasso model using train data and 10-fold CV (we need to set alpha = 1 to get lasso coefficients)
+cv_lasso <- cv.glmnet(x_train, y_train, alpha = 1)
+summary(cv_lasso)
+
+# Optimal lambda
+opt_lamb_lasso <- cv_lasso$lambda.min
+
+# Draw plot of training MSE as a function of lambda
+plot(cv_lasso)
+```
+### (ii) Then, select the optimal lambda ($\lambda$) by cross-validation. What is the optimal lambda?
+
+```{r part c_ii}
+# Optimal value of lambda
+opt_lamb_lasso
+```
+<br>
+
+The optimal lambda is $\lambda^*=$ `r format(round(opt_lamb_lasso, 6), scientific = FALSE)`.
+
+<br>
+
+### (iii) How many variables are used in the optimal Lasso fit? What are their coefficients? Is there a big difference here between Ridge and Lasso (in terms of test MSE)?
+
+Estimated coefficients:
+
+<br>
+
+```{r part c_iii}
+# Model estimation using optimal value of lambda
+lasso_reg <- glmnet(x_train, y_train, alpha = 1, lambda = opt_lamb_lasso)
+coef(lasso_reg)
+
+## Test MSE
+
+# Lasso
+lasso_pred = predict(lasso_reg, s = opt_lamb_lasso, newx = x_test)
+lasso_mse <- mean((y_test - lasso_pred)^2)
+lasso_mse
+```
+<br>
+
+Lasso regression with the optimal value of $\lambda$ found estimates the model using all variables.
+
+In terms of prediction power, $MSE_{lasso}=$ `r lasso_mse` $<$ `r ridge_mse` $=MSE_{ridge}$ which suggests that lasso has a better fit than ridge model. 
+
+### (iv) Which method of prediction would you choose and why? Is gender an important factor in the prediction model? Interpret the coeffcient of female.
+
+As stated before, lasso has the advantage of reducing the amount of parameters used for estimation. This is particularly useful when working with a big number of predictors and when the associated coefficient for many of them is close to zero (which means they are not particularly relevant). Considering MSE of lasso is smaller than ridge, lasso seems to be a better approach to estimate the model. 
+
+The female coefficient indicates that on average, women earn 28\% less than men (keeping all the other variables constant). 
+
+## (d) Repeat (b) and (c) for a more flexible specification: You would like to analyse the effect of gender and interaction effects of other variables with gender on wage jointly. The dependent variable is still the logarithm of the wage.
+
+```{r part d, tidy = TRUE, tidy.opts = list(width.cutoff = 80), fig.cap = "MSE for the ridge regression predictions (with interactions), as a function of $\\lambda$.", out.width = '80%'}
+# Relevant variables
+x_var <- c("widowed", "divorced", "separated", "nevermarried", "hsd08", "hsd911", "hsg", "cg", "ad", "mw", "so", "we", "exp1", "exp2", "exp3") 
+
+# Generate x matrix with original variables and their interaction with female
+int <- cps2012[, x_var] * cps2012$female
+
+# Rename interaction variables
+colnames(int) <- paste("int_female", colnames(int), sep="_")
+
+# Bind interaction variables to the original variables
+cps2012_int <- cbind(cps2012[, c("lnw", "female", x_var)], int)
+
+# Set seed
+set.seed(143)
+
+# Define training set (75% of total data)
+train1 <- cps2012_int %>% sample_frac(0.7)
+
+# Define test set
+test1 <- cps2012_int %>% setdiff(train1)
+
+# Define dependent variable y: lnw
+y_train1 <- train1 %>% select(lnw) %>% unlist() %>% as.numeric()
+y_test1 <- test1 %>% select(lnw)%>% unlist() %>% as.numeric()
+
+# Define matrix of predictors
+x_train1 <- train1[, -1] %>% data.matrix()
+
+x_test1 <- test1[, -1] %>% data.matrix()
+
+## Apply ridge regression using glmnet and interaction variables
+
+# Estimate ridge model using train data and 10-fold CV
+cv_ridge_int <- cv.glmnet(x_train1, y_train1, alpha = 0)
+summary(cv_ridge_int)
+
+# Optimal lambda
+opt_lamb_ridge_int <- cv_ridge_int$lambda.min
+
+# Draw plot of training MSE as a function of lambda
+plot(cv_ridge_int)
+
+# Optimal value of lambda
+opt_lamb_ridge_int
+
+# Model estimation using optimal value of lambda
+ridge_reg_int <- glmnet(x_train1, y_train1, alpha = 0, lambda = opt_lamb_ridge_int)
+coef(ridge_reg_int)
+```
+<br>
+
+The optimal lambda is $\lambda^*=$ `r round(opt_lamb_ridge_int, 4)`, same value as the model without interactions. We can interpret this as an indication that the interaction variables do not help to improve the predictions. 
+
+<br>
+
+```{r part d1, tidy = TRUE, tidy.opts = list(width.cutoff = 80), fig.cap = "MSE for the lasso regression predictions (with interactions), as a function of $\\lambda$.", out.width = '80%'}
+## Apply lasso regression using glmnet and interaction variables
+
+# Estimate lasso model using train data and 10-fold CV
+cv_lasso_int <- cv.glmnet(x_train1, y_train1, alpha = 1)
+summary(cv_ridge_int)
+
+# Optimal lambda
+opt_lamb_lasso_int <- cv_lasso_int$lambda.min
+
+# Draw plot of training MSE as a function of lambda
+plot(cv_lasso_int)
+
+# Optimal value of lambda
+opt_lamb_lasso_int
+
+# Model estimation using optimal value of lambda
+lasso_reg_int <- glmnet(x_train1, y_train1, alpha = 1, lambda = opt_lamb_lasso_int)
+coef(lasso_reg_int)
+```
+<br>
+
+The estimated coefficients suggest that many variables and interactions are not very good predictors of salaries. Among the interactions, it seems that being female and divorced, widowed or never married increase the mean salary with respect to married. Having a low level of education and being a woman also affects salary negatively. 
+
+Let's study prediction performance using MSE for test data.
+
+<br>
+
+```{r part d2}
+## Test MSE
+
+# Ridge
+ridge_int_pred = predict(ridge_reg_int, s = opt_lamb_ridge_int, newx = x_test1)
+ridge_int_mse <- mean((y_test1 - ridge_int_pred)^2)
+ridge_int_mse
+
+# Lasso
+lasso_int_pred = predict(lasso_reg_int, s = opt_lamb_lasso_int, newx = x_test1)
+lasso_int_mse <- mean((y_test1 - lasso_int_pred)^2)
+lasso_int_mse
+```
+<br>
+
+In this case again we can see that lasso performs better than ridge using new unseen data. 
+
+## (e) Based on the variable selection provided by Lasso, study the Gender Pay Gap (GPG) with this data set, including an Oaxaca-Blinder decomposition for the GPG.
+
+The variable selection used is the one related to the first LASSO regression made in part 1-c)(i)
+
+<br>
+
+```{r part e}
+# Remembering the coefficients needed
+coef(cv_lasso)
+
+# Regression used for Oaxaca Blinder decomposition
+reg_formula <- lnw ~ divorced + nevermarried + hsd08 + hsd911 + hsg + cg + ad + mw + exp1 | female
+
+# Oaxaca Blinder decomposition
+oaxaca_dec <- oaxaca(formula = reg_formula, data = cps2012)
+
+# Result of estimation
+summary.oaxaca(oaxaca_dec$beta)
+```
