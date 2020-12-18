@@ -1,0 +1,381 @@
+---
+title: "Assignment 3"
+author: "Ignacio"
+date: "02/12/2020"
+output:
+  pdf_document: default
+html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#install.packages("hdm")
+#install.packages("MXM")
+#install.packages("caret")
+#install.packages("dplyr")
+#install.packages("glmnet")
+#install.packages("MLmetrics")
+#install.packages("rmarkdown")
+#install.packages("geometry")
+
+library("rmarkdown")
+library("MLmetrics")
+library("caret")
+library(hdm)
+library("MXM")
+library("magrittr")
+library("dplyr")
+library("glmnet")
+library(lmtest)
+library(sandwich)
+library(geometry)
+data("cps2012")
+
+
+```
+
+
+
+# a)
+
+
+```{r}
+
+summary(cps2012)
+```
+
+```{r, echo=FALSE}
+
+#Scaling the variables
+
+cps2012_sc <- cps2012 %>% select(lnw, female, widowed, divorced, separated, nevermarried, hsd08, hsd911, hsg,
+                        cg, ad, mw, so, we, exp1, exp2, exp3)  %>% data.frame()
+#%>% scale(center=TRUE)
+
+#summary(cps2012_sc)
+```
+
+#b)
+```{r, echo=FALSE}
+
+# This lines of code create a data frame which contain interaction variables with female gender that we
+# will use at part d)
+
+aux <- cps2012_sc %>% select(widowed, divorced, separated, nevermarried, hsd08, hsd911, hsg,
+                                    cg, ad, mw, so, we, exp1, exp2, exp3) %>% data.matrix()
+
+interact_matrix <- aux*cps2012_sc$female
+
+colnames(interact_matrix) <- paste("interaction_g", 1:ncol(interact_matrix), sep="")
+
+
+interact_matrix_dfr = as.data.frame(interact_matrix)
+#cps2012_sc = as.data.frame(cps2012_sc)
+
+
+cps2012_sc$generated_id <- 1:nrow(cps2012_sc)
+interact_matrix_dfr$generated_id <- 1:nrow(interact_matrix_dfr)
+
+cps2012_sc_int = merge(x=cps2012_sc,y=interact_matrix_dfr,by = "generated_id" )
+cps2012_sc_int <- subset( cps2012_sc_int, select = -generated_id )
+
+
+# Here we are constructing training data with 70% of the sample and testing data with the remaining 30%
+
+set.seed(50)
+
+indx = sample(1:nrow(cps2012_sc_int), 0.7*nrow(cps2012_sc_int)) 
+
+train = cps2012_sc_int[indx,] %>% scale(center=TRUE) # Create the training data 
+test = cps2012_sc_int[-indx,] %>% scale(center=TRUE) # Create the test data
+
+
+
+
+summary(train)
+
+train_dfr = as.data.frame(train)
+test_dfr = as.data.frame(test)
+
+y_train <- train_dfr %>% select(lnw) %>% data.matrix()
+
+#matrix with predictors for the regression using training data
+
+x_train <- train_dfr %>% select(female, widowed, divorced, separated, nevermarried, hsd08, hsd911, hsg,
+                        cg, ad, mw, so, we, exp1, exp2, exp3) %>% data.matrix()
+
+#matrix with predictors for the regression with interactions
+
+x_int_train = train_dfr %>% select(female, widowed, divorced, separated, nevermarried, hsd08, hsd911, hsg,
+                                   cg, ad, mw, so, we, exp1, exp2, exp3,
+                                   interaction_g1,interaction_g2,interaction_g3,interaction_g4,interaction_g5,
+                                   interaction_g6,interaction_g7,interaction_g8,interaction_g9,interaction_g10,
+                                   interaction_g11,interaction_g12,interaction_g13,interaction_g14,interaction_g15
+                                   ) %>% data.matrix()
+
+x = cps2012_sc_int %>% select(female, widowed, divorced, separated, nevermarried, hsd08, hsd911, hsg,
+                                   cg, ad, mw, so, we, exp1, exp2, exp3,
+                                   interaction_g1,interaction_g2,interaction_g3,interaction_g4,interaction_g5,
+                                   interaction_g6,interaction_g7,interaction_g8,interaction_g9,interaction_g10,
+                                   interaction_g11,interaction_g12,interaction_g13,interaction_g14,interaction_g15
+                                   ) %>% data.matrix()
+
+y <- cps2012_sc_int %>% select(lnw)  %>% data.matrix()
+
+x_train_dfr = as.data.frame(x_train)
+
+#################################################
+
+#testing data
+
+y_test <- test_dfr %>% select(lnw) %>% data.matrix()
+x_test <- test_dfr %>% select(female, widowed, divorced, separated, nevermarried, hsd08, hsd911, hsg,
+                           cg, ad, mw, so, we, exp1, exp2, exp3) %>% data.matrix()
+x_int_test = test_dfr %>% select(female, widowed, divorced, separated, nevermarried, hsd08, hsd911, hsg,
+                                   cg, ad, mw, so, we, exp1, exp2, exp3,
+                                   interaction_g1,interaction_g2,interaction_g3,interaction_g4,interaction_g5,
+                                   interaction_g6,interaction_g7,interaction_g8,interaction_g9,interaction_g10,
+                                   interaction_g11,interaction_g12,interaction_g13,interaction_g14,interaction_g15
+)%>% data.matrix()
+
+
+
+
+
+
+
+# RIDGE
+
+## i)
+
+# Ridge regression for the default grid of values of lambda
+
+ridge <- cv.glmnet(x_train, y_train, alpha = 0, standardize = TRUE) 
+
+lambda10 <- 10^seq(2, -3, by = -.1)
+ridge <- cv.glmnet(x_train, y_train, alpha = 0, lambda = lambda10, nfolds = 10, standardize = TRUE) 
+```
+# Plot of the 10-fold CV MSE as a function of lambda
+
+plot(ridge)
+
+## ii)
+
+optimal_lambda <- ridge$lambda.min
+print(optimal_lambda)
+
+fit <- ridge$glmnet.fit
+
+summary(fit) 
+
+#ridge prediction 
+
+ridge <- glmnet(x_train, y_train, alpha = 0, lambda = optimal_lambda, nfolds = 10, standardize = TRUE) 
+
+predictions_test_ridge <- predict(ridge, s = optimal_lambda, newx = x_test, newdata = test)
+
+
+RMSE_ridge = sqrt(MSE(predictions_test_ridge, y_test ))
+
+
+print(RMSE_ridge)
+
+# Number of variables
+
+ridge.coef=predict(ridge,type="coefficients",
+s=optimal_lambda)
+
+sum(ridge.coef!=0)
+
+
+## iii) 
+
+#ols 
+
+lr = lm(y_train ~ female + widowed + divorced + separated + nevermarried + hsd08 + hsd911 + hsg +
+        cg + ad + mw + so + we + exp1 + exp2 + exp3, data=train_dfr )
+
+coeftest(lr, vcov.=vcovHC(lr, "HC0")) # Robust Standard Errors
+
+predictions_ols = predict(lr, newx = x_test, newdata = test)
+
+RMSE_ols = sqrt(MSE(predictions_ols, y_test ))
+
+print(RMSE_ols)
+
+
+
+
+
+
+
+summary(lr)
+
+
+
+
+
+#LASSO
+
+cv_lasso <- cv.glmnet(x_train,y_train, alpha= 1, lambda = lambda10, nfolds = 10)
+
+#cv_lasso <- cv.glmnet(x_int_train,y_train, alpha= 1, type.measure = 'mse')
+
+optimal_lambda_ls <- cv_lasso$lambda.min 
+
+
+print(optimal_lambda_ls)
+plot(cv_lasso)
+
+
+
+predictions_test_ls <- predict(cv_lasso, s = optimal_lambda_ls, newx = x_test)
+RMSE_lasso = sqrt(MSE(predictions_test_ls, y_test ))
+print(RMSE_lasso)
+
+# Number of variables
+
+lasso.coef=predict(cv_lasso,type="coefficients",
+s=optimal_lambda_ls)
+
+
+sum(lasso.coef!=0)
+
+
+##########
+
+#d) #########################
+
+#OLS
+
+lr = lm(y_train ~ female + widowed + divorced + separated + nevermarried + hsd08 + hsd911 + hsg +
+          cg + ad + mw + so + we + exp1 + exp2 + exp3 + interaction_g1 + interaction_g2 + interaction_g3
+        + interaction_g4+ interaction_g5 +interaction_g6 + interaction_g7 + interaction_g8 + interaction_g9
+        + interaction_g10 + interaction_g11 + interaction_g12 + interaction_g13 + interaction_g14 + 
+          interaction_g15, data=train)
+          
+       
+
+
+predictions_ols = predict(lr, newx = x_int_test, newdata = test)
+
+RMSE_ols = sqrt(MSE(predictions_ols, y_test ))
+
+print(RMSE_ols)
+
+summary(lr)
+
+#RIDGE
+
+ridge <- glmnet(x_int_train, y_train, alpha = 0, lambda = optimal_lambda, nfolds = 10, standardize = TRUE) 
+
+predictions_test_ridge <- predict(ridge, s = optimal_lambda, newx = x_test, newdata = test)
+
+RMSE_ridge = sqrt(MSE(predictions_test_ridge, y_test ))
+
+
+print(RMSE_ridge)
+
+ridge.coef=predict(ridge,type="coefficients",
+s=optimal_lambda)
+
+sum(ridge.coef!=0)
+
+#LASSO
+
+cv_lasso <- glmnet(x_int_train,y_train, alpha= 1, lambda = optimal_lambda_ls, nfolds = 10)
+
+predictions_test_ls <- predict(cv_lasso, s = optimal_lambda_ls, newx = x_int_test)
+RMSE_lasso = sqrt(MSE(predictions_test_ls, y_test ))
+print(RMSE_lasso)
+
+
+# Number of variables
+
+lasso.coef=predict(cv_lasso,type="coefficients",
+s=optimal_lambda_ls)[1:20,]
+
+
+sum(lasso.coef!=0)
+
+sum(lasso.coef=0)
+
+
+
+round(lasso.coef[lasso.coef!=0],4)
+
+
+#Oaxaca descomposition
+
+cv_lasso <- cv.glmnet(x,y, alpha= 1, lambda = lambda10, nfolds = 10)
+
+
+optimal_lambda_ls <- cv_lasso$lambda.min 
+
+
+
+
+x_w = df_w %>% select(female, widowed, divorced, separated, nevermarried, hsd08, hsd911, hsg,
+                                   cg, ad, mw, so, we, exp1, exp2, exp3,
+                                   interaction_g1,interaction_g2,interaction_g3,interaction_g4,interaction_g5,
+                                   interaction_g6,interaction_g7,interaction_g8,interaction_g9,interaction_g10,
+                                   interaction_g11,interaction_g12,interaction_g13,interaction_g14,interaction_g15
+                                   ) %>% data.matrix()
+
+y_w <- df_w %>% select(lnw)  %>% data.matrix()
+
+
+x_m = df_m %>% select(female, widowed, divorced, separated, nevermarried, hsd08, hsd911, hsg,
+                                   cg, ad, mw, so, we, exp1, exp2, exp3,
+                                   interaction_g1,interaction_g2,interaction_g3,interaction_g4,interaction_g5,
+                                   interaction_g6,interaction_g7,interaction_g8,interaction_g9,interaction_g10,
+                                   interaction_g11,interaction_g12,interaction_g13,interaction_g14,interaction_g15
+                                   ) %>% data.matrix()
+
+y_m <- df_m %>% select(lnw)  %>% data.matrix()
+
+
+cv_lasso_w <- cv.glmnet(x_w,y_w, alpha= 1, lambda = lambda10, nfolds = 10)
+
+cv_lasso_m <- cv.glmnet(x_m,y_m, alpha= 1, lambda = lambda10, nfolds = 10)
+
+
+lasso_coefw=predict(cv_lasso_w,type="coefficients",
+s=optimal_lambda_ls)[1:20,]
+
+lasso_coefm=predict(cv_lasso_m,type="coefficients",
+s=optimal_lambda_ls)[1:20,]
+
+
+df_w <- subset(cps2012_sc_int, cps2012_sc_int$female == 1)
+df_m <- subset(cps2012_sc_int, cps2012_sc_int$female == 0)
+
+aux_w <- list( rep(1,length(df_w$lnw)), df_w$widowed, df_w$divorced, df_w$separated, df_w$nevermarried, df_w$hsd08, df_w$hsd911, df_w$ hsg, df_w$cg, df_w$ad, df_w$ mw, df_w$so, df_w$we, df_w$exp1, df_w$exp2, df_w$exp3)
+
+aux_m <- list(rep(1,length(df_w$lnw)), df_m$widowed, df_m$divorced, df_m$separated, df_m$nevermarried, df_m$hsd08, df_m$hsd911, df_m$ hsg, df_m$cg, df_m$ad, df_m$mw, df_m$so, df_m$we, df_m$exp1, df_m$exp2, df_m$exp3)
+
+
+over <- mean(df_w$lnw) - mean(df_m$lnw)
+
+print(over)
+
+Xbar1<- unlist(lapply(aux_w, mean))
+Xbar0<- unlist(lapply(aux_m, mean))
+
+
+
+ols_w <- lm(lnw ~ widowed +divorced + separated + nevermarried + hsd08 + hsd911 + hsg + cg + ad + mw + so + we
+                  + exp1 + exp2 +exp3, data = subset(cps2012_sc_int, cps2012_sc_int$female == 1))
+                    
+
+
+ols_m <- lm(lnw ~ widowed +divorced + separated + nevermarried + hsd08 + hsd911 + hsg + cg + ad + mw + so + we
+                  + exp1 + exp2 +exp3, data = subset(cps2012_sc_int, cps2012_sc_int$female == 0))
+
+str1 <- coef(ols_w) - coef(ols_m)
+str <- dot(Xbar1,str1)
+
+comp <- dot(Xbar1 - Xbar0,coef(ols_m))
+
+

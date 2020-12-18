@@ -1,0 +1,353 @@
+---
+title: "Assignment 3 - Econometrics"
+author: "Victoria Milani"
+date:
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, tidy.opts = list(width.cutoff = 80), fig.align = "center")
+```
+
+## 1. Predicting Wages in USA
+
+```{r packages, include = FALSE, echo = FALSE}
+# Load packages
+
+list_packages <- c("dplyr", "formatR", "ggplot2", "glmnet", "hdm", "Hmisc", "magrittr", "oaxaca")
+
+sapply(list_packages, require, character.only = TRUE)
+
+```
+
+### **(a) Load, prepare and summarize data.**
+
+```{r 1 a), results = 'hide'}
+# US census data from the CPS in the year 2012.
+
+df <- cps2012
+describe(df)
+```
+
+```{r auxiliar}
+ 
+# y is the dependent variable: lnw <- log_wage 
+y <- df %>% select(lnw) %>% data.matrix()
+
+# x is the predictors' matrix , using the 16 variables
+x <- df %>% select(female, widowed, divorced, separated, nevermarried, hsd08, hsd911, hsg, cg, ad, mw, so, we, exp1, exp2, exp3) %>% data.matrix()
+
+# Splitting the data in order to make the tests MSE
+set.seed(6697)
+## Defining training set
+ train <- df %>% sample_frac(0.7)
+## Defining test set
+ test <- df %>% setdiff(train)
+
+## Dependent variable y: lnw
+ train_y <- train %>% select(lnw) %>% unlist() %>% data.matrix()
+ test_y <- test %>% select(lnw)%>% unlist() %>% data.matrix()
+## Matrix of predictors
+ train_x <- train %>% select(female, widowed, divorced, separated, nevermarried, hsd08, hsd911, hsg, cg, ad, mw, so, we, exp1, exp2, exp3) %>% data.matrix()
+ test_x <- test %>% select(female, widowed, divorced, separated, nevermarried, hsd08, hsd911, hsg, cg, ad, mw, so, we, exp1, exp2, exp3) %>% data.matrix()
+
+```
+
+### **(b) Apply Ridge-Regression with cross-validation (CV):**
+  (i) Apply ridge regression to the previous dataset for the the default grid of values of lambda. Plot the 10-fold CV MSE as a function of lambda.
+    
+```{r 1 b)(i), out.width = '80%', fig.cap = "MSE for the ridge regression predictions, as a function of $\\lambda$." }
+
+  ### RIDGE REGRESSION
+
+# Fit ridge regression using CV
+ridge <- cv.glmnet(x, y, alpha = 0)
+
+# Plot the 10-fold as function of lambda
+plot(ridge)
+```
+
+
+
+  (ii) Then, select the optimal lambda ($\lambda$) by cross-validation. How many variables are used in the Ridge fit?
+
+```{r 1 b)(ii)}
+
+# Finding the best lambda by CV
+(best_lambda <- ridge$lambda.min)
+
+
+# Fitting the model for the best lambda
+(ridgereg = glmnet(x, y, alpha = 0, lambda = best_lambda))
+
+```
+
+The optimal lambda by CV is the one that minimizes the training Mean Squared Error (MSE) with value equal `r round(best_lambda, 4)`. The numbers of variables used was 16 and it is possible to know since Ridge does not make any variable selection.
+
+
+  (iii) Why is the test MSE for Ridge often smaller than for OLS when lambda is not zero?
+
+```{r 1 b)(iii)}
+
+# Calculating the MSE test for Ridge
+training_ridgereg = glmnet(train_x, train_y, alpha = 0, lambda = best_lambda)
+(mse_ridge <- mean(((ridge_pred = predict(training_ridgereg, s = best_lambda, newx = test_x, newdata = test))-test_y)^2))
+
+# Calculating the MSE test for OLS_1
+training_olsreg1 = glmnet(train_x, train_y, alpha = 0, lambda = 0)
+(mse_ols1 <- mean(((ols1_pred = predict(training_olsreg1, newx = test_x, newdata = test))-test_y)^2))
+
+
+# Calculating the MSE test for OLS_2
+training_olsreg2 = lm(train_y ~ female + widowed + divorced + separated + nevermarried + hsd08 + hsd911 + hsg + cg + ad + mw + so + we + exp1 + exp2 + exp3, data=train)
+(mse_ols2 <- mean(((ols2_pred = predict(training_olsreg2, newx = test_x, newdata = test))-test_y)^2))
+
+
+```
+
+Usually the test MSE for Ridge is smaller because of the optimization method that is used. It will increase the bias, but decrease the variance, and since $MSE = bias+\sigma^2$, we can obtains some prediction gains by compensating the effects. 
+
+More intuitively, Ridge drecrease the relevance on the regression from the variables with less explanatory power, making their coefficient shrinks to zero, what rises the explanatory power to outside-sample data. The OLS describes better inside-sample data, but has in overfitting on the own dataset. So, depending on the objective, you can pick with method fits better.
+
+
+
+  (iv) What is the optimal value of lambda? Is unrestricted OLS optimal here, in a test MSE sense?
+
+Considering the fact that the optimal lambda is very close to zero(`r round(best_lambda, 4)`), when comparing both methods, the tests MSE have similar results, but OLS seems to be better on this case, with a MSE value of `r round(mse_ols2, 4)`, compared to `r round(mse_ridge, 4)` from Ridge.
+
+
+
+### **(c) Apply LASSO with cross-validation (CV):**
+  (i) Apply Lasso regression to the previous dataset for the the default grid of values of lambda. Plot the 10-fold CV MSE as a function of lambda.
+
+```{r 1 c)(i), out.width = '80%', fig.cap = "MSE for the LASSO regression predictions, as a function of $\\lambda$." }
+
+# y (dependent variable) and x (predictors' matrix) remains the same from part b)
+  
+  ### LASSO REGRESSION
+
+# Fit LASSO regression using CV
+lasso <- cv.glmnet(x, y, alpha = 1)
+coef(lasso)
+
+# Plot the 10-fold as function of lambda
+plot(lasso)
+```
+
+
+  (ii) Then, select the optimal lambda ($\lambda$) by cross-validation. What is the optimal lambda?
+
+```{r 1 c)(ii)}
+
+# Finding lambda by CV
+(minimal_lambda_lasso <- lasso$lambda.min)
+
+```
+
+The minimum lambda by CV is equal to `r minimal_lambda_lasso`.
+
+
+  (iii) How many variables are used in the optimal Lasso fit? What are their coefficients? Is there a big difference here between Ridge and Lasso (in terms of test MSE)?
+
+```{r 1 c)(iii)_1}
+
+# Fitting the model
+lassoreg_min = glmnet(x, y, alpha = 1, lambda = minimal_lambda_lasso)
+```
+
+For the minimal value of lambda, lasso does not make variables selection, so it uses the 16 variables, with coefficients showed above. 
+
+```{r 1 c)(iii)_2}
+
+# Calculating the MSE test for LASSO
+training_lasso = glmnet(train_x, train_y, alpha = 1, lambda = minimal_lambda_lasso)
+(mse_lasso <- mean(((lasso_pred = predict(training_lasso, s = minimal_lambda_lasso, newx = test_x, newdata = test))-test_y)^2))
+
+```
+
+Remembering that MSE for Ridge was `r round(mse_ridge,4)`, now we compare to the MSE for LASSO that has a value of `r round(mse_lasso,4)`. Both have a pretty close value, but the one from LASSO is still a little bit smaller.
+
+
+  (iv) Which method of prediction would you choose and why? Is gender an important factor in the prediction model? Interpret the coefficient of female.
+
+```{r 1 c)(iv)}
+
+lassofinal = glmnet(x, y, alpha = 1, lambda = minimal_lambda_lasso)
+coef(lassofinal)
+```
+
+
+I would choose LASSO method, since it is the one with smaller MSE. Also, it is a better method for predicting than OLS, even if both had almost the same MSE value. 
+
+Considering the `female` variable, it is possible to say that it is relevant for understanding the wages, meaning that gender affects the wage that a person can have. 
+An interpretation would be that if you have `female = 1`, that is, if you are a woman, you receive 28% less than if you were a man, ceteris paribus. 
+
+
+### **(d) Repeat (b) and (c) for a more flexible speciffication: You would like to analyse the effect of gender and interaction effects of other variables with gender on wage jointly. The dependent variable is still the logarithm of the wage.**
+
+```{r auxiliar for d)}
+ 
+# x_int is the predictors' matrix , using the 16 variables and interactions
+x_int <- model.matrix(~female*(widowed + divorced + separated + nevermarried + hsd08 + hsd911 + hsg + cg + ad + mw + so + we + exp1 + exp2 + exp3), df)
+
+# Total matrix with y and x_int
+int <- cbind(df[,'lnw'], x_int) %>% as.data.frame()
+
+# Splitting the data in order to make the tests MSE
+set.seed(6697)
+## Defining training set
+ int_train <- int %>% sample_frac(0.7)
+## Defining test set
+ int_test <- int %>% setdiff(int_train)
+
+## Dependent variable y: lnw
+ int_train_y <- int_train %>% select(V1) %>% unlist() %>% data.matrix()
+ int_test_y <- int_test %>% select(V1)%>% unlist() %>% data.matrix()
+## Matrix of predictors
+ int_train_x <- int_train[, -1:-2] %>% data.matrix()
+ int_test_x <- int_test[, -1:-2] %>% data.matrix()
+
+```
+
+  **b)** 
+    (i)
+    
+```{r 1-d b)(i), out.width = '80%', fig.cap = "MSE for the ridge regression predictions with interaction, as a function of $\\lambda$." }
+
+  ### RIDGE REGRESSION
+
+# Fit ridge regression using CV
+ridge_int <- cv.glmnet(x_int, y, alpha = 0)
+
+# Plot the 10-fold as function of lambda
+plot(ridge_int)
+```
+
+
+
+  (ii) 
+  
+```{r 1-d b)(ii)}
+
+# Finding the best lambda by CV
+(best_lambda_int <- ridge_int$lambda.min)
+
+
+# Fitting the model for the best lambda
+(ridgereg_int = glmnet(x_int, y, alpha = 0, lambda = best_lambda_int))
+
+```
+
+The optimal lambda by CV is the one that minimizes the training Mean Squared Error (MSE) with value equal `r round(best_lambda_int, 4)`. The numbers of variables used was 16 and it is possible to know since Ridge does not make any variable selection.
+
+
+  (iii) 
+
+```{r 1-d b)(iii)}
+
+# Calculating the MSE test for Ridge
+training_ridgereg_int = glmnet(int_train_x, int_train_y, alpha = 0, lambda = best_lambda_int)
+(mse_ridge_int <- mean(((ridge_pred_int = predict(training_ridgereg_int, s = best_lambda_int, newx = int_test_x, newdata = int_test))-int_test_y)^2))
+
+# Calculating the MSE test for OLS_1
+training_olsreg1_int = glmnet(int_train_x, int_train_y, alpha = 0, lambda = 0)
+(mse_ols1_int <- mean(((ols1_pred_int = predict(training_olsreg1_int, newx = int_test_x, newdata = int_test))-int_test_y)^2))
+
+```
+
+Same justify as in part b)
+
+
+
+  (iv)
+
+Considering the fact that the optimal lambda is very close to zero (`r round(best_lambda_int, 4)`), when comparing both methods, the tests MSE have similar results, but OLS seems to be better on this case, with a MSE value of `r round(mse_ols1_int, 4)`, compared to `r round(mse_ridge_int, 4)` from Ridge. 
+
+
+
+  **(c)**
+    (i)
+    
+```{r 1-d c)(i), out.width = '80%', fig.cap = "MSE for the LASSO regression predictions with interaction, as a function of $\\lambda$." }
+
+# y (dependent variable) and x (predictors' matrix) remains the same from part b)
+  
+  ### LASSO REGRESSION
+
+# Fit LASSO regression using CV
+lasso_int <- cv.glmnet(x_int, y, alpha = 1)
+coef(lasso_int)
+
+# Plot the 10-fold as function of lambda
+plot(lasso_int)
+```
+
+
+  (ii) 
+
+```{r 1-d c)(ii)}
+
+# Finding lambda by CV
+(minimal_lambda_lasso_int <- lasso_int$lambda.min)
+
+```
+
+The minimum lambda by CV is equal to `r minimal_lambda_lasso_int`.
+
+
+  (iii) 
+
+```{r 1-d c)(iii)_1}
+
+# Fitting the model
+lassoreg_min_int = glmnet(x_int, y, alpha = 1, lambda = minimal_lambda_lasso_int)
+```
+
+For the minimal value of lambda, lasso does not make variables selection, so it uses the 16 variables, with coefficients showed above. 
+
+```{r 1-d c)(iii)_2}
+
+# Calculating the MSE test for LASSO
+training_lasso_int = glmnet(int_train_x, int_train_y, alpha = 1, lambda = minimal_lambda_lasso_int)
+(mse_lasso_int <- mean(((lasso_pred_int = predict(training_lasso_int, s = minimal_lambda_lasso_int, newx = int_test_x, newdata = int_test))-int_test_y)^2))
+
+```
+
+Remembering that MSE for Ridge was `r round(mse_ridge_int,4)`, now we compare to the MSE for LASSO that has a value of `r round(mse_lasso_int,4)`. Both have a pretty close value, but the one from LASSO is still a little bit smaller.
+
+
+  (iv) 
+  
+```{r 1-d c)(iv)}
+
+lassofinal_int = glmnet(x_int, y, alpha = 1, lambda = minimal_lambda_lasso_int)
+coef(lassofinal_int)
+```
+
+
+I would choose LASSO method, since it is the one with smaller MSE. Also, it is a better method for predicting than OLS, even if both had almost the same MSE value. 
+
+Considering the `female` variable, it is possible to say that it is relevant for understanding the wages, meaning that gender affects the wage that a person can have. 
+An interpretation would be that if you have `female = 1`, that is, if you are a woman, you receive 28% less than if you were a man, ceteris paribus. 
+
+
+### **(e) Based on the variable selection provided by Lasso, study the Gender Pay Gap (GPG) with this data set, including an Oaxaca-Blinder decomposition for the GPG.**
+
+The variable selection used is the one related to the first LASSO regression made on part 1-c)(i)
+
+```{r 1 e)}
+
+# Remembering the coefficients needed
+coef(lasso)
+
+# Regression used for Oaxaca Blinder decomposition
+reg <- lnw ~ nevermarried + hsd08 + hsd911 + hsg + cg + ad + mw + exp1 | female
+
+# Oaxaca Blinder decomposition
+oaxaca_dec <- oaxaca(formula = reg, data = df)
+
+# Results
+summary.oaxaca(oaxaca_dec$beta)
+```
+
+
